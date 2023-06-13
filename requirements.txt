@@ -6,4 +6,5 @@ pickle
 datetime
 scikit-learn
 autoimpute
+pipeline
 -e .

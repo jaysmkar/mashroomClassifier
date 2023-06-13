@@ -1,149 +1,136 @@
-import os 
-import sys 
+"""  
+EDA Summary: 
+1. Instead of np.nan we have '?' values in stalk-root column we have to replace it by np.nan. --> done
+2. There is only one unique value in column veil-type so we can drop it then and there itself. --> done
+3. Using the single imputer to impute the np.nan values in the dataset. --> object ready 
+4. In the target column there is 'p' and 'e' replace all the 'p':0 and 'e':1 using .map()
+5. Encoding rest all columns rather than target using get_dummies() and storing it in new_data variable.
+"""
+
+import os, sys 
 import numpy as np 
 import pandas as pd 
-from src.utils import save_object
-from dataclasses import dataclass 
-from src.exception import CustomException
 from src.logger import logging 
+from src.exception import CustomException
+from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
+from dataclasses import dataclass
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
-from autoimpute.imputations import SingleImputer,MultipleImputer
-from autoimpute.imputations.series import MultinomialLogisticImputer
+from src.utils import save_object 
 
+@dataclass
+class DataTransformationConfig():
+    preprocessor_file_path = os.path.join('artifacts/data_transformation', 'preprocessor.pkl')
 
-@dataclass 
-class DataTransformationConfig: 
-    preprocessor_obj_file_path = os.path.join('artifacts', 'preprocessor.pkl')
-    
-class DataTransformation: 
-    def __init__(self):
-        self.data_transformation_config = DataTransformation()
+class DataTransformation():
+
+    def __inti__(self):
+        self.data_transformation_config = DataTransformationConfig() 
         
-    def get_data_transformer_object(self):
+    def get_data_transformation_obj(self):
+        """ 
+        This function is only used for imputing the missing values in the dataset.
         """
-        This function is responsible for data transformation
-        """
-        try: 
-            
-            """
-            There are only categorical columns in the dataset so performing the missing value imputations
-            on the same categorical dataset.
-            """
-            cat_columns = ['cap-shape', 'cap-surface', 'cap-color', 'bruises%3F', 'odor',
-                'gill-attachment', 'gill-spacing', 'gill-size', 'gill-color',
-                'stalk-shape', 'stalk-root', 'stalk-surface-above-ring',
-                'stalk-surface-below-ring', 'stalk-color-above-ring',
-                'stalk-color-below-ring', 'veil-color', 'ring-number', 'ring-type',
-                'spore-print-color', 'population', 'habitat', 'class']
-            
-            cat_pipeline = Pipeline(
-                steps=[
-                    ("imputer", SingleImputer(statergy="categorical")),
-                    ("scalar", StandardScaler())
-                ]
+        try:
+            cat_pipeline = ['cap-shape', 'cap-surface', 'cap-color', 'bruises%3F', 'odor',
+                            'gill-attachment', 'gill-spacing', 'gill-size', 'gill-color',
+                            'stalk-shape', 'stalk-root', 'stalk-surface-above-ring',
+                            'stalk-surface-below-ring', 'stalk-color-above-ring',
+                            'stalk-color-below-ring', 'veil-color', 'ring-number', 'ring-type',
+                            'spore-print-color', 'population', 'habitat']         
+            categorical_pipeline = Pipeline(
+                steps = [(
+                    ("imputer", SimpleImputer(strategy='mode'))
+                )]
             )
-            
-            logging.info(f'Categorical columns are:{cat_columns}')
-
-            preprocessor = ColumnTransformer(
-                [
-                    ("categorical_pipeline", cat_pipeline, cat_columns)
-                ]
-            )
-            
-            return preprocessor
+            # APPLYING THE COLUMNTRANSFORMER 
+            preprocessor = ColumnTransformer([
+                ('cat_pipeline', categorical_pipeline, cat_pipeline)
+            ])
+            # RETURNING THE PREPROCESSOR OBJECT 
+            return preprocessor  
             
         except Exception as e:
-            raise CustomException(e,sys)
+            raise CustomException(e, sys)
         
-        
-    def data_transformation(self, train_path, test_path):
-        
+    def remove_outlier_IQR(self, df, col):
+        """ 
+        This function is used to remove outlier from the numerical columns.
+        """
         try: 
-            # 1. Instead of np.nan we have '?' values in stalk-root column we have to replace it by np.nan. __> done
-            # 2. There is only one unique value in column veil-type so we can drop it then and there itself. --> done
-            # 3. Using the single imputer to impute the np.nan values in the dataset. 
-            # 4. In the target column there is 'p' and 'e' replace all the 'p':0 and 'e':1. --> done 
-            # 5. Encoding rest all columns rather than target using get_dummies() and storing it in new_data variable.
+            logging.info('inside the remove_outlier_IQR class')
+            Q1 = df[col].quantile(0.25)
+            Q3 = df[col].quantile(0.75)
+            IQR = Q3-Q1
+            UL = Q3+1.5*IQR 
+            LL = Q1-1.5*IQR
+            df.loc[(df[col]> UL), col] = UL 
+            df.loc[(df[col]< UL), col] = LL 
+            return df 
+        except Exception as e:
+            raise CustomException(e, sys)
+    
+    def initiate_data_transformation(self, train_data_path, test_data_path):
+        try:
+            logging.info('Inside the data initiate data transformation method.')
+            
+            # READING THE TRAIN AND TEST DATASETS 
+            logging.info('Reading the train and test data path started.')
+            train_data = pd.read_csv(train_data_path)
+            test_data = pd.read_csv(test_data_path)
+            logging.info('Reading train and test data path completed.')
 
-            logging.info('train and test data files reading initiated.')
-            train_df = pd.read_csv(train_path)
-            test_df = pd.read_csv(test_path)
-            logging.info('train and test data reading files completed.')
+            # DELETING THE USELESS COLUMNS 
+            logging.info('Deleting useless columns started.')
+            train_data = train_data.drop(columns=['veil-type'], axis=1)
+            test_data = test_data.drop(columns=['veil-type'], axis=1)
+            logging.info('Deleting useless columns finished.')
             
-            logging.info('obtaining the preprocessor object.')
-            preprocessor_obj = self.get_data_transformer_object()
-            logging.info('captured the preprocessor object information.')
+            # REPLACING THE '?' BY NP.NAN VALUES 
+            logging.info("Replacing '?' by np.nan values initialized")
+            train_data = train_data['stalk-root'].replace('?', np.nan)
+            test_data = test_data['stalk-root'].replace('?', np.nan)
+            logging.info("Replacing '?' by np.nan values finished.")
 
-            target_column = 'class'
-            to_drop_column = 'veil-type'
-            categorical_columns = ['cap-shape', 'cap-surface', 'cap-color', 'bruises%3F', 'odor',
-                'gill-attachment', 'gill-spacing', 'gill-size', 'gill-color',
-                'stalk-shape', 'stalk-root', 'stalk-surface-above-ring',
-                'stalk-surface-below-ring', 'stalk-color-above-ring',
-                'stalk-color-below-ring', 'veil-color', 'ring-number', 'ring-type',
-                'spore-print-color', 'population', 'habitat', 'class']
-            
-            #replacing the '?' values with the np.nan values.
-            train_df["stalk-root"] =train_df["stalk-root"].replace('?',np.nan) 
-            test_df["stalk-root"] = test_df["stalk-root"].replace('?', np.nan)
-            
-            # replacing class column in train_df and test_df p:0 and e:1
-            logging.info("Replacing 'e' and 'p' started.")
-            train_df['class'] = train_df['class'].replace({"'p'":0, "'e'":1})
-            test_df['class'] = test_df['calss'].replace({"'p'": 0, "'e'": 1})
-            logging.info("Replacing 'e' and 'p' ended.")
             
             
-            #dividing the data into the input data and output data
-            logging.info('Dividing the input and output information that is the input and target variables')
-            input_feature_train_df = train_df.drop(columns=[target_column, to_drop_column], axis=1)
-            target_feature_train_df = train_df['class']
+            target_columns = "class"
+            drop_columns = [target_columns]
+
+            # SPLITTING THE DATA INTO TRAIN AND TEST DATA 
+            logging.info('data splitting in dependent and independent columns initiated.')
+            input_feature_train_data = train_data.drop(columns=drop_columns, axis=1)
+            target_feature_train_data = train_data[target_columns]
+            input_feature_test_data = test_data.drop(columns=drop_columns, axis=1)
+            target_feature_test_data = test_data[target_columns]
+            logging.info('data splitting in dependent and independent columns finished.')
             
-            input_feature_test_df = test_df.drop(columns=[target_column, to_drop_column], axis=1)
-            target_feature_test_df = test_df['class']
-            logging.info("Dividing the information completed.")
+            # APPLYING THE PREPROCESSOR OBJECT ON TRAIN AND TEST ARRAY. 
+            logging.info('application of preprocessor object started.')
+            preprocessor_obj = self.get_data_transformation_obj()
+            input_train_array = preprocessor_obj.fit_transform(input_feature_train_data)
+            input_test_array = preprocessor_obj.fit(input_feature_test_data)
+            logging.info('application of preprocessor object finished.')
             
-            # encoding the data values using get_dummies() 
-            logging.info("Encoding the train and test data using get_dummies() initiated.")
-            column_list = ['cap-shape', 'cap-surface', 'cap-color', 'bruises%3F', 'odor',
-                    'gill-attachment', 'gill-spacing', 'gill-size', 'gill-color',
-                    'stalk-shape', 'stalk-root', 'stalk-surface-above-ring',
-                    'stalk-surface-below-ring', 'stalk-color-above-ring',
-                    'stalk-color-below-ring', 'veil-color', 'ring-number', 'ring-type',
-                    'spore-print-color', 'population', 'habitat']
-            for column in column_list:
-                train_df = pd.get_dummies(train_df, columns=[column], drop_first=True)
-                test_df = pd.get_dummies(test_df, columns=[column], drop_first=True)
-            logging.info("Encoding the train and test data using get_dummies() succeeded.")
+            train_array = np.c_[input_train_array, np.array(target_feature_train_data)]
+            test_array = np.c_[input_test_array, np.array(target_feature_test_data)]
+
             
-            # applying the preprocessing object on data.
-            logging.info("Application of preprocessor initiated.")
-            input_feature_train_arr = preprocessor_obj.fit_transform(input_feature_train_df)
-            input_feature_test_arr = preprocessor_obj.transform(input_feature_test_df)
-            logging.info("Aplication of the preprocessor succeeded.")
+            ###################################################
+            ##########Get dummies() method remaining########### 
+            ###################################################
             
-            # final conversion into the training and testing array. 
-            logging.info('Final conversion of train and test data initiated.')
-            train_arr = np.c_[input_feature_train_arr, np.array(target_feature_train_df)]
-            test_arr = np.c_[input_feature_test_arr, np.array(target_feature_test_df)]
-            logging.info('Final conversion of train and test data succeded.')
-            
-            #finally saving the object. 
-            logging.info('Saving object initiated.')
-            save_object(
-                file_path = self.data_transformation_config.preprocessor_obj_file_path,
-                obj = preprocessor_obj
-            )
-            logging.info('Saving object completed.')
+            save_object(file_path=self.data_transformation_config.preprocessor_file_path,
+                        object_name=preprocessor_obj)
             
             return(
-                train_arr,
-                test_arr, 
-                self.data_transformation_config.preprocessor_obj_file_path
+                train_array, 
+                test_array,
+                self.data_transformation_config.preprocessor_file_path
             )
-  
-        except Exception as e:
-            raise CustomException(e,sys)
+            
+        except Exception as e: 
+            raise CustomException(e, sys)
+        
+        
