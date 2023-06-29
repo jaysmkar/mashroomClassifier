@@ -2,7 +2,6 @@ numpy
 pandas 
 matplotlib 
 seaborn 
-pickle
 datetime
 scikit-learn
 autoimpute
